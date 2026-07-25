@@ -74,68 +74,89 @@ async function getMlPrediction(features) {
     };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(
-    () => controller.abort(),
-    ML_TIMEOUT_MS
-  );
+  const maxAttempts = 3;
 
-  try {
-    const response = await fetch(
-      `${ML_SERVICE_URL}/predict`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(features),
-        signal: controller.signal,
-      }
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const controller = new AbortController();
+
+    const timeout = setTimeout(
+      () => controller.abort(),
+      ML_TIMEOUT_MS
     );
 
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(
-        data.error || `ML service returned ${response.status}`
+    try {
+      const response = await fetch(
+        `${ML_SERVICE_URL}/predict`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(features),
+          signal: controller.signal,
+        }
       );
-    }
 
-    return {
-      available: true,
-      isAnomaly: Boolean(data.isAnomaly),
-      prediction: data.prediction || "UNKNOWN",
-      anomalyScore: toNonNegativeNumber(data.anomalyScore),
-      decisionScore:
-        data.decisionScore === null ||
-        data.decisionScore === undefined
-          ? null
-          : Number(data.decisionScore),
-      model: data.model || "Isolation Forest",
-      error: null,
-    };
-  } catch (error) {
-    console.error(
-      "ML prediction unavailable:",
-      error.name === "AbortError"
-        ? "Request timed out"
-        : error.message
-    );
+      const responseText = await response.text();
 
-    return {
-      available: false,
-      isAnomaly: false,
-      prediction: "UNAVAILABLE",
-      anomalyScore: 0,
-      decisionScore: null,
-      model: "Isolation Forest",
-      error:
+      let data;
+
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        throw new Error(
+          `ML service returned non-JSON response: ${response.status} ${responseText.slice(0, 80)}`
+        );
+      }
+
+      if (!response.ok) {
+        throw new Error(
+          data.error || `ML service returned ${response.status}`
+        );
+      }
+
+      return {
+        available: true,
+        isAnomaly: Boolean(data.isAnomaly),
+        prediction: data.prediction || "UNKNOWN",
+        anomalyScore: toNonNegativeNumber(data.anomalyScore),
+        decisionScore:
+          data.decisionScore === null ||
+          data.decisionScore === undefined
+            ? null
+            : Number(data.decisionScore),
+        model: data.model || "Isolation Forest",
+        error: null,
+      };
+    } catch (error) {
+      const message =
         error.name === "AbortError"
           ? "ML request timed out"
-          : error.message,
-    };
-  } finally {
-    clearTimeout(timeout);
+          : error.message;
+
+      console.error(
+        `ML prediction attempt ${attempt}/${maxAttempts} failed:`,
+        message
+      );
+
+      if (attempt < maxAttempts) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, attempt * 2000)
+        );
+      } else {
+        return {
+          available: false,
+          isAnomaly: false,
+          prediction: "UNAVAILABLE",
+          anomalyScore: 0,
+          decisionScore: null,
+          model: "Isolation Forest",
+          error: message,
+        };
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 }
 
