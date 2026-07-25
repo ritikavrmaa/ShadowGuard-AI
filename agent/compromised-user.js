@@ -1,11 +1,11 @@
-const axios = require("axios");
+﻿const axios = require("axios");
 
-const API_URL = "http://127.0.0.1:5000";
+const API_URL = "https://shadowguard-backend.onrender.com/log";
 
 async function simulateCompromisedRahul() {
   try {
     for (let i = 1; i <= 10; i++) {
-      const response = await axios.post(`${API_URL}/log`, {
+      const response = await axios.post(API_URL, {
         agent: "Developer Rahul",
         action: `Suspicious repository access ${i}`,
 
